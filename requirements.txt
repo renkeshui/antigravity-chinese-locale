@@ -1,0 +1,2 @@
+# Needs only the Python standard library, no external pip packages required.
+# 仅依赖 Python 标准库与 Node.js 运行时，无需额外 pip 安装第三方包。
