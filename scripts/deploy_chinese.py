@@ -3,14 +3,16 @@
 
 """
 Antigravity Chinese Locale One-Click Installer
-Google Antigravity 官方客户端一键安全汉化与热重载工具
+Google Antigravity 官方客户端一键安全汉化与全生命周期持久化工具
 
 Features:
-- Auto-detects Antigravity resources folder
+- Auto-detects Antigravity resources folder across Windows, macOS & Linux
 - Automatic pristine backup (app.asar.bak)
 - Microtask loop prevention & Base UI controlled component bridge
-- Static syntax gatekeeper (node --check)
+- Full WebContents lifecycle hook (prevents reverting on restart, refresh, or child windows)
+- Static syntax gatekeeper (node --check on all modified files)
 - Atomic replacement of app.asar & app.asar.unpacked
+- Optional live hot-reload via Chrome DevTools Protocol (CDP)
 """
 
 import os
@@ -40,8 +42,8 @@ def find_antigravity_resources():
 
 def main():
     print("=" * 60)
-    print("  Google Antigravity Chinese Localization Installer")
-    print("  Google Antigravity 客户端一键安全汉化工具")
+    print("  Google Antigravity Chinese Localization Installer v2.0")
+    print("  Google Antigravity 客户端一键安全汉化工具 (全生命周期持久版)")
     print("=" * 60)
 
     # 1. 检查 Node.js 环境
@@ -98,36 +100,90 @@ def main():
         shutil.copy2(i18n_data_src, os.path.join(dist_dir, "i18n_data.json"))
 
         utils_js = os.path.join(dist_dir, "utils.js")
+        main_js = os.path.join(dist_dir, "main.js")
+        modified_files = []
+
+        # A. 注入 utils.js (主窗体生命周期与唤醒补偿)
         with open(utils_js, "r", encoding="utf-8") as f:
-            content = f.read()
+            u_content = f.read()
 
         inject_code = (
-            'win.webContents.on("dom-ready",function(){\n'
-            '  try{\n'
-            '    var fs=require("fs"),path=require("path");\n'
-            '    var d=path.join(__dirname,"i18n_data.json");\n'
-            '    var r=path.join(__dirname,"i18n_runner.js");\n'
-            '    if(fs.existsSync(d)&&fs.existsSync(r)){\n'
-            '      var dt=fs.readFileSync(d,"utf8");\n'
-            '      var js=fs.readFileSync(r,"utf8");\n'
-            '      win.webContents.executeJavaScript("window.__antigravity_i18n_data = "+dt+";\\n"+js);\n'
-            '    }\n'
-            '  }catch(e){console.error("i18n inject error:",e);}\n'
-            '});'
+            '    const injectAntigravityI18n = (target) => {\n'
+            '        try {\n'
+            '            const wc = target?.webContents ? target.webContents : target;\n'
+            '            if (!wc || typeof wc.executeJavaScript !== "function" || wc.isDestroyed()) return;\n'
+            '            const runnerPath = path_1.default.join(__dirname, "i18n_runner.js");\n'
+            '            const dataPath = path_1.default.join(__dirname, "i18n_data.json");\n'
+            '            if (fs.existsSync(runnerPath) && fs.existsSync(dataPath)) {\n'
+            '                const dataStr = fs.readFileSync(dataPath, "utf-8");\n'
+            '                const runnerCode = fs.readFileSync(runnerPath, "utf-8");\n'
+            '                const script = `\n'
+            '                    (function(){\n'
+            '                        try {\n'
+            '                            window.__ANTIGRAVITY_I18N_DATA__ = ${JSON.stringify(JSON.parse(dataStr))};\n'
+            '                            ${runnerCode}\n'
+            '                        } catch(e) {\n'
+            '                            console.error("[Antigravity i18n] Error executing i18n runner:", e);\n'
+            '                        }\n'
+            '                    })();\n'
+            '                `;\n'
+            '                wc.executeJavaScript(script).catch(() => {});\n'
+            '            }\n'
+            '        } catch (e) {\n'
+            '            console.error("[Antigravity i18n] Injection error:", e);\n'
+            '        }\n'
+            '    };\n'
+            '    exports.injectAntigravityI18n = injectAntigravityI18n;\n'
+            '    win.webContents.on("dom-ready", () => injectAntigravityI18n(win.webContents));\n'
+            '    win.webContents.on("did-finish-load", () => injectAntigravityI18n(win.webContents));\n'
+            '    win.webContents.on("did-navigate-in-page", () => injectAntigravityI18n(win.webContents));\n'
         )
 
-        if "i18n_runner.js" not in content:
+        if "injectAntigravityI18n" not in u_content:
             needle = "win.webContents.setWindowOpenHandler"
-            if needle in content:
-                content = content.replace(needle, inject_code + "\n" + needle, 1)
+            if needle in u_content:
+                u_content = u_content.replace(needle, inject_code + "\n    " + needle, 1)
             else:
-                content = content + "\n" + inject_code
-            with open(utils_js, "w", encoding="utf-8") as f:
-                f.write(content)
+                u_content = u_content + "\n" + inject_code
 
-        # 5. 严格语法检查门禁
+            show_needle = "wins[0].focus();"
+            if show_needle in u_content:
+                u_content = u_content.replace(
+                    show_needle,
+                    show_needle + "\n        if (exports.injectAntigravityI18n) { (0, exports.injectAntigravityI18n)(wins[0]); }",
+                    1
+                )
+
+            with open(utils_js, "w", encoding="utf-8") as f:
+                f.write(u_content)
+        modified_files.append(utils_js)
+
+        # B. 注入 main.js (全局 web-contents-created 守卫)
+        if os.path.exists(main_js):
+            with open(main_js, "r", encoding="utf-8") as f:
+                m_content = f.read()
+
+            if "web-contents-created" not in m_content:
+                main_inject = (
+                    "    // Register global WebContents i18n injection lifecycle hook\n"
+                    "    electron_1.app.on('web-contents-created', (_event, wc) => {\n"
+                    "        wc.on('dom-ready', () => { if (utils_1.injectAntigravityI18n) (0, utils_1.injectAntigravityI18n)(wc); });\n"
+                    "        wc.on('did-finish-load', () => { if (utils_1.injectAntigravityI18n) (0, utils_1.injectAntigravityI18n)(wc); });\n"
+                    "        wc.on('did-navigate-in-page', () => { if (utils_1.injectAntigravityI18n) (0, utils_1.injectAntigravityI18n)(wc); });\n"
+                    "    });\n"
+                )
+                when_ready_needle = "electron_1.app.whenReady().then(async () => {"
+                if when_ready_needle in m_content:
+                    m_content = m_content.replace(when_ready_needle, when_ready_needle + "\n" + main_inject, 1)
+                    with open(main_js, "w", encoding="utf-8") as f:
+                        f.write(m_content)
+            modified_files.append(main_js)
+
+        modified_files.append(os.path.join(dist_dir, "i18n_runner.js"))
+
+        # 5. 严格语法检查门禁 (node --check)
         print("[*] Performing syntax gatekeeper checks (node --check)...")
-        for fpath in [utils_js, os.path.join(dist_dir, "i18n_runner.js")]:
+        for fpath in modified_files:
             chk = subprocess.run(["node", "--check", fpath], capture_output=True, text=True)
             if chk.returncode != 0:
                 print(f"[Error] Syntax verification failed on {fpath}:\n{chk.stderr}")
@@ -173,7 +229,7 @@ def main():
                             dt_str = f.read()
                         with open(os.path.join(dist_dir, "i18n_runner.js"), "r", encoding="utf-8") as f:
                             rn_str = f.read()
-                        full_code = "window.__antigravity_i18n_data = " + dt_str + ";\n" + rn_str
+                        full_code = "window.__ANTIGRAVITY_I18N_DATA__ = " + dt_str + ";\n" + rn_str
                         ws_url = page["webSocketDebuggerUrl"]
                         node_eval = f'''
                         const ws = new WebSocket({json.dumps(ws_url)});
@@ -193,7 +249,9 @@ def main():
 
         print("\n" + "=" * 60)
         print("  Localization deployed successfully! Enjoy Antigravity in Chinese.")
-        print("  汉化部署成功！请直接查看 Antigravity 客户端（无需手动重启）。")
+        print("  汉化部署成功！")
+        print("  提示：若关闭窗口后重新打开仍显示英文，请在任务栏右下角系统托盘彻底退出")
+        print("  Antigravity 或在任务管理器结束残留进程后再打开，即可永久生效。")
         print("=" * 60)
 
     finally:
