@@ -2,7 +2,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const electron = require('electron');
+let electron;
+try {
+    electron = require('electron');
+} catch (e) {
+    // 允许在非 Electron 运行时（如离线单元测试或构建环境）中安全加载
+}
 
 function injectAntigravityI18n(target) {
     try {
@@ -15,16 +20,14 @@ function injectAntigravityI18n(target) {
         if (fs.existsSync(runnerPath) && fs.existsSync(dataPath)) {
             const dataStr = fs.readFileSync(dataPath, 'utf-8');
             const runnerCode = fs.readFileSync(runnerPath, 'utf-8');
-            const script = `
-                (function(){
-                    try {
-                        window.__ANTIGRAVITY_I18N_DATA__ = ${JSON.stringify(JSON.parse(dataStr))};
-                        ${runnerCode}
-                    } catch(e) {
-                        console.error('[Antigravity i18n] Error executing i18n runner:', e);
-                    }
-                })();
-            `;
+            const script = '(function(){\n' +
+                '  try {\n' +
+                '    window.__ANTIGRAVITY_I18N_DATA__ = ' + JSON.stringify(JSON.parse(dataStr)) + ';\n' +
+                runnerCode + '\n' +
+                '  } catch(e) {\n' +
+                '    console.error("[Antigravity i18n] Error executing i18n runner:", e);\n' +
+                '  }\n' +
+                '})();';
             wc.executeJavaScript(script).catch(() => {});
         }
     } catch (e) {
@@ -54,14 +57,14 @@ function setupI18nLifecycle(app) {
     // 3. 多实例与托盘唤醒补偿
     app.on('second-instance', () => {
         setTimeout(() => {
-            if (electron.BrowserWindow && typeof electron.BrowserWindow.getAllWindows === 'function') {
+            if (electron && electron.BrowserWindow && typeof electron.BrowserWindow.getAllWindows === 'function') {
                 electron.BrowserWindow.getAllWindows().forEach(win => injectAntigravityI18n(win));
             }
         }, 150);
     });
 
     app.on('activate', () => {
-        if (electron.BrowserWindow && typeof electron.BrowserWindow.getAllWindows === 'function') {
+        if (electron && electron.BrowserWindow && typeof electron.BrowserWindow.getAllWindows === 'function') {
             electron.BrowserWindow.getAllWindows().forEach(win => injectAntigravityI18n(win));
         }
     });
