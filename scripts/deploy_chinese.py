@@ -112,9 +112,13 @@ def main():
             m_content = f.read()
 
         hook_code = (
-            "\n// Antigravity Chinese Localization Lifecycle Hook\n"
+            "\n// Antigravity Chinese Localization Lifecycle Hook (Resilient Edition)\n"
             "try {\n"
-            "    require('./i18n_inject').setupI18nLifecycle(electron_1.app);\n"
+            "    const _electron = require('electron');\n"
+            "    const _app = (_electron && _electron.app) || (typeof electron_1 !== 'undefined' && electron_1.app);\n"
+            "    if (_app) {\n"
+            "        require('./i18n_inject').setupI18nLifecycle(_app);\n"
+            "    }\n"
             "} catch (e) {\n"
             "    console.error('[Antigravity i18n] Setup error:', e);\n"
             "}\n"
