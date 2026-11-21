@@ -2,15 +2,16 @@
 # -*- coding: utf-8 -*-
 
 """
-Antigravity Chinese Locale One-Click Installer
+Antigravity Chinese Locale One-Click Installer v2.1
 Google Antigravity 官方客户端一键安全汉化与全生命周期持久化工具
 
 Features:
 - Auto-detects Antigravity resources folder across Windows, macOS & Linux
 - Automatic pristine backup (app.asar.bak)
-- Microtask loop prevention & Base UI controlled component bridge
-- Full WebContents lifecycle hook (prevents reverting on restart, refresh, or child windows)
-- Static syntax gatekeeper (node --check on all modified files)
+- Decoupled architecture: independent i18n_inject module, zero pollution to utils.js
+- Full WebContents & BrowserWindow lifecycle guards (prevents reverting on restart, refresh, or child windows)
+- Traps second-instance & activate events for seamless tray wake-up compensation
+- Strict syntax gatekeeper (node --check on all modified files)
 - Atomic replacement of app.asar & app.asar.unpacked
 - Optional live hot-reload via Chrome DevTools Protocol (CDP)
 """
@@ -42,8 +43,8 @@ def find_antigravity_resources():
 
 def main():
     print("=" * 60)
-    print("  Google Antigravity Chinese Localization Installer v2.0")
-    print("  Google Antigravity 客户端一键安全汉化工具 (全生命周期持久版)")
+    print("  Google Antigravity Chinese Localization Installer v2.1")
+    print("  Google Antigravity 客户端一键安全汉化工具 (独立模块守护版)")
     print("=" * 60)
 
     # 1. 检查 Node.js 环境
@@ -80,13 +81,14 @@ def main():
     else:
         print("[✓] Existing backup detected (app.asar.bak).")
 
-    # 4. 解包与注入
+    # 4. 解包与部署核心资产
     script_dir = os.path.dirname(os.path.abspath(__file__))
     i18n_runner_src = os.path.join(script_dir, "i18n_runner.js")
     i18n_data_src = os.path.join(script_dir, "i18n_data.json")
+    i18n_inject_src = os.path.join(script_dir, "i18n_inject.js")
 
-    if not os.path.exists(i18n_runner_src) or not os.path.exists(i18n_data_src):
-        print("[Error] Missing i18n_runner.js or i18n_data.json in scripts directory.")
+    if not os.path.exists(i18n_runner_src) or not os.path.exists(i18n_data_src) or not os.path.exists(i18n_inject_src):
+        print("[Error] Missing required i18n scripts in scripts directory.")
         sys.exit(1)
 
     work_dir = tempfile.mkdtemp(prefix="antigravity_i18n_")
@@ -98,91 +100,53 @@ def main():
         os.makedirs(dist_dir, exist_ok=True)
         shutil.copy2(i18n_runner_src, os.path.join(dist_dir, "i18n_runner.js"))
         shutil.copy2(i18n_data_src, os.path.join(dist_dir, "i18n_data.json"))
+        shutil.copy2(i18n_inject_src, os.path.join(dist_dir, "i18n_inject.js"))
 
-        utils_js = os.path.join(dist_dir, "utils.js")
         main_js = os.path.join(dist_dir, "main.js")
-        modified_files = []
+        if not os.path.exists(main_js):
+            print("[Error] dist/main.js not found in extracted app.asar.")
+            sys.exit(1)
 
-        # A. 注入 utils.js (主窗体生命周期与唤醒补偿)
-        with open(utils_js, "r", encoding="utf-8") as f:
-            u_content = f.read()
+        # 5. 在 main.js 顶部挂载独立生命周期守卫 (彻底避免侵入 utils.js 局部作用域)
+        with open(main_js, "r", encoding="utf-8") as f:
+            m_content = f.read()
 
-        inject_code = (
-            '    const injectAntigravityI18n = (target) => {\n'
-            '        try {\n'
-            '            const wc = target?.webContents ? target.webContents : target;\n'
-            '            if (!wc || typeof wc.executeJavaScript !== "function" || wc.isDestroyed()) return;\n'
-            '            const runnerPath = path_1.default.join(__dirname, "i18n_runner.js");\n'
-            '            const dataPath = path_1.default.join(__dirname, "i18n_data.json");\n'
-            '            if (fs.existsSync(runnerPath) && fs.existsSync(dataPath)) {\n'
-            '                const dataStr = fs.readFileSync(dataPath, "utf-8");\n'
-            '                const runnerCode = fs.readFileSync(runnerPath, "utf-8");\n'
-            '                const script = `\n'
-            '                    (function(){\n'
-            '                        try {\n'
-            '                            window.__ANTIGRAVITY_I18N_DATA__ = ${JSON.stringify(JSON.parse(dataStr))};\n'
-            '                            ${runnerCode}\n'
-            '                        } catch(e) {\n'
-            '                            console.error("[Antigravity i18n] Error executing i18n runner:", e);\n'
-            '                        }\n'
-            '                    })();\n'
-            '                `;\n'
-            '                wc.executeJavaScript(script).catch(() => {});\n'
-            '            }\n'
-            '        } catch (e) {\n'
-            '            console.error("[Antigravity i18n] Injection error:", e);\n'
-            '        }\n'
-            '    };\n'
-            '    exports.injectAntigravityI18n = injectAntigravityI18n;\n'
-            '    win.webContents.on("dom-ready", () => injectAntigravityI18n(win.webContents));\n'
-            '    win.webContents.on("did-finish-load", () => injectAntigravityI18n(win.webContents));\n'
-            '    win.webContents.on("did-navigate-in-page", () => injectAntigravityI18n(win.webContents));\n'
+        hook_code = (
+            "\n// Antigravity Chinese Localization Lifecycle Hook\n"
+            "try {\n"
+            "    require('./i18n_inject').setupI18nLifecycle(electron_1.app);\n"
+            "} catch (e) {\n"
+            "    console.error('[Antigravity i18n] Setup error:', e);\n"
+            "}\n"
         )
 
-        if "injectAntigravityI18n" not in u_content:
-            needle = "win.webContents.setWindowOpenHandler"
-            if needle in u_content:
-                u_content = u_content.replace(needle, inject_code + "\n    " + needle, 1)
+        if "i18n_inject" not in m_content:
+            needle = 'const electron_1 = require("electron");'
+            if needle in m_content:
+                m_content = m_content.replace(needle, needle + "\n" + hook_code, 1)
             else:
-                u_content = u_content + "\n" + inject_code
+                # 兼容不同编译产物的 import 形式
+                alt_needle = 'require("electron")'
+                if alt_needle in m_content:
+                    # 在首个 electron 引用下方安全注入
+                    idx = m_content.find(alt_needle)
+                    end_idx = m_content.find("\n", idx)
+                    if end_idx != -1:
+                        m_content = m_content[:end_idx+1] + hook_code + m_content[end_idx+1:]
+                else:
+                    print("[Error] Unable to locate Electron module import in main.js. Packaging aborted to prevent corruption.")
+                    sys.exit(1)
 
-            show_needle = "wins[0].focus();"
-            if show_needle in u_content:
-                u_content = u_content.replace(
-                    show_needle,
-                    show_needle + "\n        if (exports.injectAntigravityI18n) { (0, exports.injectAntigravityI18n)(wins[0]); }",
-                    1
-                )
+            with open(main_js, "w", encoding="utf-8") as f:
+                f.write(m_content)
 
-            with open(utils_js, "w", encoding="utf-8") as f:
-                f.write(u_content)
-        modified_files.append(utils_js)
-
-        # B. 注入 main.js (全局 web-contents-created 守卫)
-        if os.path.exists(main_js):
-            with open(main_js, "r", encoding="utf-8") as f:
-                m_content = f.read()
-
-            if "web-contents-created" not in m_content:
-                main_inject = (
-                    "    // Register global WebContents i18n injection lifecycle hook\n"
-                    "    electron_1.app.on('web-contents-created', (_event, wc) => {\n"
-                    "        wc.on('dom-ready', () => { if (utils_1.injectAntigravityI18n) (0, utils_1.injectAntigravityI18n)(wc); });\n"
-                    "        wc.on('did-finish-load', () => { if (utils_1.injectAntigravityI18n) (0, utils_1.injectAntigravityI18n)(wc); });\n"
-                    "        wc.on('did-navigate-in-page', () => { if (utils_1.injectAntigravityI18n) (0, utils_1.injectAntigravityI18n)(wc); });\n"
-                    "    });\n"
-                )
-                when_ready_needle = "electron_1.app.whenReady().then(async () => {"
-                if when_ready_needle in m_content:
-                    m_content = m_content.replace(when_ready_needle, when_ready_needle + "\n" + main_inject, 1)
-                    with open(main_js, "w", encoding="utf-8") as f:
-                        f.write(m_content)
-            modified_files.append(main_js)
-
-        modified_files.append(os.path.join(dist_dir, "i18n_runner.js"))
-
-        # 5. 严格语法检查门禁 (node --check)
+        # 6. 严格语法检查门禁 (node --check)
         print("[*] Performing syntax gatekeeper checks (node --check)...")
+        modified_files = [
+            main_js,
+            os.path.join(dist_dir, "i18n_inject.js"),
+            os.path.join(dist_dir, "i18n_runner.js")
+        ]
         for fpath in modified_files:
             chk = subprocess.run(["node", "--check", fpath], capture_output=True, text=True)
             if chk.returncode != 0:
@@ -190,7 +154,7 @@ def main():
                 sys.exit(1)
         print("[✓] Syntax checks passed 100%.")
 
-        # 6. 打包新 asar
+        # 7. 打包新 asar
         temp_pack = os.path.join(tempfile.gettempdir(), "antigravity_new.asar")
         temp_unpacked = temp_pack + ".unpacked"
         if os.path.exists(temp_pack):
@@ -205,7 +169,7 @@ def main():
             check=True
         )
 
-        # 7. 原子替换
+        # 8. 原子替换
         target_unpacked = target_asar + ".unpacked"
         if os.path.exists(temp_unpacked):
             if os.path.exists(target_unpacked):
@@ -215,7 +179,7 @@ def main():
         shutil.copy2(temp_pack, target_asar)
         print("[✓] Production app.asar successfully updated!")
 
-        # 8. 尝试 CDP 实时热注入
+        # 9. 尝试 CDP 实时热注入
         try:
             active_port_file = os.path.join(os.environ.get("APPDATA", ""), "Antigravity", "DevToolsActivePort")
             if os.path.exists(active_port_file):
@@ -249,7 +213,7 @@ def main():
 
         print("\n" + "=" * 60)
         print("  Localization deployed successfully! Enjoy Antigravity in Chinese.")
-        print("  汉化部署成功！")
+        print("  汉化部署成功！(v2.1 全生命周期持久化与独立模块守护版)")
         print("  提示：若关闭窗口后重新打开仍显示英文，请在任务栏右下角系统托盘彻底退出")
         print("  Antigravity 或在任务管理器结束残留进程后再打开，即可永久生效。")
         print("=" * 60)
