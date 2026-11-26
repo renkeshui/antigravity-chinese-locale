@@ -90,7 +90,8 @@ description: Electron 桌面端软件深度汉化、解包逆向、防崩溃与�
 
 ## 三、打包部署与交付 SOP
 
-1. **资产备份**：复制官方原包为 `app.asar.bak`。
+0. **仓库同步（上游更新）**：若基于仓库 `https://github.com/renkeshui/antigravity-chinese-locale.git` 安装或更新本技能，执行前先从 `main` 分支拉取（`git pull` 或重新下载）最新 `skills/Chinesizing/SKILL.md` 与 `scripts/`（`i18n_data.json`、`deploy_chinese.py` 等），并将 `SKILL.md` 同步至全局技能目录，确保词典与脚本为最新版本。
+1. **资产备份**：复制官方原包为 `app.asar.bak`（若使用 `scripts/deploy_chinese.py`，会自动识别官方新版本并刷新备份）。
 2. **门禁校验**：对所有修改与注入脚本执行 `node --check`（必须 0 报错），并运行自动化门禁测试。
 3. **沙箱闭环**：`asar pack`（声明 `--unpack-dir`）生成测试包 ➔ 解包至临时目录 ➔ 二次 `node --check` 与词典完整性校验。
 4. **成对原子部署**：将 `app.asar` 与 `app.asar.unpacked` 同步原子替换至生产目录。
