@@ -23,11 +23,11 @@ Google Antigravity 桌面客户端简体中文汉化包与工程规范（支持 
 
 ### 快速开始
 
-#### 方式一：作为 Antigravity Skill（推荐）
-1. 将 [`skills/Chinesizing`](skills/Chinesizing) 复制到 Antigravity 全局技能目录：
-   - **Windows**：`%USERPROFILE%\.gemini\config\skills\Chinesizing\`
-   - **macOS / Linux**：`~/.gemini/config/skills/Chinesizing/`
-2. 在对话中输入 `/Chinesizing` 让智能体执行汉化部署或增量补词。
+#### 方式一：让 Antigravity 自动安装/更新（推荐）
+直接复制下方指令发送给 Antigravity，即可自动获取最新版技能、词典与脚本并完成汉化（后续每次更新也可发同一句）：
+> 请从 `https://github.com/renkeshui/antigravity-chinese-locale.git` 拉取 `main` 分支最新内容，将 `skills/Chinesizing` 同步到我的全局技能目录，并使用仓库最新脚本与词典完成客户端汉化部署。
+
+*(如需手动安装技能：请将 [`skills/Chinesizing`](skills/Chinesizing) 文件夹复制到全局技能目录 `%USERPROFILE%\.gemini\config\skills\Chinesizing\` 或 `~/.gemini/config/skills/Chinesizing/`，切勿直接将整个仓库根目录克隆进 `skills/`。)*
 
 #### 方式二：独立 Python 脚本
 ```bash
